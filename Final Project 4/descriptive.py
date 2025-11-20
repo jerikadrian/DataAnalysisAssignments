@@ -33,8 +33,12 @@ def final_descriptive_plot(df):
 
     xlabels = 'Indoor Temperature', 'Outdoor Temperature', 'Indoor Humidity', 'Outdoor Humidity', 'Windspeed', 'Visibility'
     [ax.set_xlabel(s) for ax,s in zip(axs.flat,xlabels)]
-    axs.flat[0].set_ylabel('Energy')
-    [ax.set_yticklabels([])  for ax in axs.flat[1:]]
+
+    for i, ax in enumerate(axs.flat):
+        if i in [1, 2]:
+            ax.set_yticklabels([])
+
+    fig.text(0.04, 0.5, 'Energy', va='center', rotation='vertical', fontsize=12)
 
     fig.text(0.5, -0.05,
              "Figure 1. Correlations amongst main variables.",
