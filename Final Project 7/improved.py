@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 from IPython.display import display, Markdown
 
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.svm import SVR
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
@@ -14,6 +17,7 @@ def display_title(s, pref="Figure", num=1, center=False):
     display(Markdown(s))
 
 TARGET = "heating_load"
+
 FEATURES = [
     "relative_compactness",
     "surface_area",
@@ -24,6 +28,9 @@ FEATURES = [
     "glazing_area",
     "glazing_area_distribution",
 ]
+
+CAT_FEATURES = ["orientation", "glazing_area_distribution"]
+NUM_FEATURES = [c for c in FEATURES if c not in CAT_FEATURES]
 
 TEST_SIZE = 0.20
 RANDOM_STATE = 42
@@ -42,13 +49,34 @@ def _metrics(y_true, y_pred):
     mae = mean_absolute_error(y_true, y_pred)
     return r2, rmse, mae
 
+def _common_limits(*arrays):
+    lo = min([np.min(a) for a in arrays])
+    hi = max([np.max(a) for a in arrays])
+    return lo, hi
+
+def _make_preprocessor():
+    """
+    Scaling + encoding only:
+      - scale numeric columns
+      - one-hot encode categorical columns
+    Fitted on training data inside the Pipeline.
+    """
+    pre = ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), NUM_FEATURES),
+            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), CAT_FEATURES),
+        ],
+        remainder="drop"
+    )
+    return pre
+
 def _fit_models_if_needed():
-    """Fit KNN and SVR once (NO preprocessing), store everything in _cache."""
+    """Fit KNN and SVR once (WITH scaling+encoding), store everything in _cache."""
     global _cache
     if _cache.get("fitted", False):
         return
 
-    X = df[FEATURES].to_numpy(dtype=float)
+    X = df[FEATURES].copy()
     y = df[TARGET].to_numpy(dtype=float)
 
     h = df["overall_height"].to_numpy(dtype=float)
@@ -57,8 +85,17 @@ def _fit_models_if_needed():
         X, y, h, test_size=TEST_SIZE, random_state=RANDOM_STATE
     )
 
-    knn_model = KNeighborsRegressor(n_neighbors=KNN_K)
-    svr_model = SVR(kernel=SVR_KERNEL, C=SVR_C, epsilon=SVR_EPS, gamma=SVR_GAMMA)
+    pre = _make_preprocessor()
+
+    knn_model = Pipeline([
+        ("pre", pre),
+        ("knn", KNeighborsRegressor(n_neighbors=KNN_K))
+    ])
+
+    svr_model = Pipeline([
+        ("pre", pre),
+        ("svr", SVR(kernel=SVR_KERNEL, C=SVR_C, epsilon=SVR_EPS, gamma=SVR_GAMMA))
+    ])
 
     knn_model.fit(X_train, y_train)
     svr_model.fit(X_train, y_train)
@@ -76,11 +113,6 @@ def _fit_models_if_needed():
         "y_pred_svr": y_pred_svr,
     }
 
-def _common_limits(*arrays):
-    lo = min([np.min(a) for a in arrays])
-    hi = max([np.max(a) for a in arrays])
-    return lo, hi
-
 def fig_observed_vs_predicted(show=True):
     _fit_models_if_needed()
     y_test = _cache["y_test"]
@@ -95,9 +127,9 @@ def fig_observed_vs_predicted(show=True):
     lo, hi = _common_limits(y_test, y_knn, y_svr)
 
     for ax, y_pred, title, stats_txt in [
-        (axs[0], y_knn, "KNN Regression (test set)",
+        (axs[0], y_knn, "KNN Regression (test set) [scaling + encoding]",
          f"R²={r2_knn:.3f}\nRMSE={rmse_knn:.2f}\nMAE={mae_knn:.2f}"),
-        (axs[1], y_svr, "SVR Regression (test set)",
+        (axs[1], y_svr, "SVR Regression (test set) [scaling + encoding]",
          f"R²={r2_svr:.3f}\nRMSE={rmse_svr:.2f}\nMAE={mae_svr:.2f}")
     ]:
         ax.scatter(y_test, y_pred, alpha=0.55)
@@ -145,13 +177,13 @@ def fig_stratified_by_height(show=True):
     )
 
     panels = [
-        (axs[0,0], y_test[idx_low],  y_knn[idx_low],  f"KNN (test) | height = {h_low}",
+        (axs[0,0], y_test[idx_low],  y_knn[idx_low],  f"KNN (test) | height = {h_low} [scaling + encoding]",
          f"n={idx_low.sum()}\nR²={r2_knn_low:.3f}\nRMSE={rmse_knn_low:.2f}\nMAE={mae_knn_low:.2f}"),
-        (axs[0,1], y_test[idx_high], y_knn[idx_high], f"KNN (test) | height = {h_high}",
+        (axs[0,1], y_test[idx_high], y_knn[idx_high], f"KNN (test) | height = {h_high} [scaling + encoding]",
          f"n={idx_high.sum()}\nR²={r2_knn_high:.3f}\nRMSE={rmse_knn_high:.2f}\nMAE={mae_knn_high:.2f}"),
-        (axs[1,0], y_test[idx_low],  y_svr[idx_low],  f"SVR (test) | height = {h_low}",
+        (axs[1,0], y_test[idx_low],  y_svr[idx_low],  f"SVR (test) | height = {h_low} [scaling + encoding]",
          f"n={idx_low.sum()}\nR²={r2_svr_low:.3f}\nRMSE={rmse_svr_low:.2f}\nMAE={mae_svr_low:.2f}"),
-        (axs[1,1], y_test[idx_high], y_svr[idx_high], f"SVR (test) | height = {h_high}",
+        (axs[1,1], y_test[idx_high], y_svr[idx_high], f"SVR (test) | height = {h_high} [scaling + encoding]",
          f"n={idx_high.sum()}\nR²={r2_svr_high:.3f}\nRMSE={rmse_svr_high:.2f}\nMAE={mae_svr_high:.2f}"),
     ]
 
@@ -171,16 +203,16 @@ def fig_stratified_by_height(show=True):
         plt.show()
     return fig
 
-def plot_ml_figure1(num=4):
+def plot_improved_figure1(num=6):
     display_title(
-        "Observed vs predicted on the held-out test set (KNN vs SVR)",
+        "Observed vs predicted on the held-out test set (KNN vs SVR) [scaling + encoding]",
         pref="Figure", num=num, center=False
     )
     fig_observed_vs_predicted(show=True)
 
-def plot_ml_figure2(num=5):
+def plot_improved_figure2(num=7):
     display_title(
-        "Model performance changes across height regimes (h = 3.5 vs 7.0) for KNN and SVR",
+        "Model performance changes across height regimes (h = 3.5 vs 7.0) for KNN and SVR [scaling + encoding]",
         pref="Figure", num=num, center=False
     )
     fig_stratified_by_height(show=True)
